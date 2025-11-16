@@ -10,8 +10,8 @@ class MONGO_DB:
     def conn(self):
         uri = (
             f"mongodb+srv://kanaeldev:{SETTINGS.PWD}"
-            "@kanael0.yuazcu9.mongodb.net/aplicacao?"
-            "retryWrites=true&w=majority&appName=kanael0"
+            f"@kanael0.yuazcu9.mongodb.net/aplicacao?"
+            f"retryWrites=true&w=majority&appName=kanael0"
         )
         
         client = MongoClient(uri, server_api=ServerApi('1'))
