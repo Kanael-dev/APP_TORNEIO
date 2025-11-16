@@ -9,7 +9,7 @@ class MONGO_DB:
     
     def conn(self):
         uri = (
-            f"mongodb+srv://kanaeldev:{SETTINGS.PWD}"
+            f"mongodb+srv://kanaeldev:Kanaeldev123"
             f"@kanael0.yuazcu9.mongodb.net/aplicacao?"
             f"retryWrites=true&w=majority&appName=kanael0"
         )

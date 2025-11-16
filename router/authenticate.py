@@ -6,11 +6,14 @@ from utils.config import SETTINGS
 
 SECRET_KEY = SETTINGS.API_KEY
 
-def generate_token(user_id):
+
+def generate_token(user_id, role=None):
     payload = {
         "user_id": user_id,
         "exp": datetime.utcnow() + timedelta(hours=2)
     }
+    if role:
+        payload["role"] = role
     return jwt.encode(payload, SECRET_KEY, algorithm="HS256")
 
 def token_required(f):
