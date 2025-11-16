@@ -8,8 +8,9 @@ class MONGO_DB:
         pass
     
     def conn(self):
+        pwd = SETTINGS.PWD
         uri = (
-            f"mongodb+srv://kanaeldev:Kanaeldev123"
+            f"mongodb+srv://kanaeldev:{pwd}"
             f"@kanael0.yuazcu9.mongodb.net/aplicacao?"
             f"retryWrites=true&w=majority&appName=kanael0"
         )
