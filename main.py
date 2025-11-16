@@ -16,6 +16,3 @@ app.register_blueprint(players_router)
 
 if __name__ == "__main__":
     app.run(debug=True)
-    
-    
-    
