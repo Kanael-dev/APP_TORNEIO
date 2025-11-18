@@ -9,10 +9,12 @@ class MONGO_DB:
     
     def conn(self):
         pwd = SETTINGS.PWD
+        user = SETTINGS.USER
+        connUser = SETTINGS.CONNUSER
         uri = (
-            f"mongodb+srv://kanaeldev:{pwd}"
-            f"@kanael0.yuazcu9.mongodb.net/aplicacao?"
-            f"retryWrites=true&w=majority&appName=kanael0"
+            f"mongodb+srv://{connUser}:{pwd}"
+            f"@{user}.yuazcu9.mongodb.net/aplicacao?"
+            f"retryWrites=true&w=majority&appName={user}"
         )
         
         client = MongoClient(uri, server_api=ServerApi('1'))
