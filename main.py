@@ -1,7 +1,7 @@
 import os
-from flask import Flask, request
-from router.routers import players_router
-from router.authenticate import generate_token
+from flask import Flask
+from router.admin.admin_private import admin_router
+from router.formulario.routes import form_router
 from flask_cors import CORS
 
 app = Flask(__name__)
@@ -13,8 +13,9 @@ CORS(
     allow_headers=["Content-Type", "Authorization"],
 )
 
-# Registra o Blueprint
-app.register_blueprint(players_router)
+# Registra os Blueprints
+app.register_blueprint(admin_router)
+app.register_blueprint(form_router)
 
 if __name__ == "__main__":
     port = int(os.environ.get("PORT", 5000))
