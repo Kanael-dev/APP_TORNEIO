@@ -11,11 +11,8 @@ class MONGO_DB:
         pwd = SETTINGS.PWD
         user = SETTINGS.USER
         connUser = SETTINGS.CONNUSER
-        uri = (
-            f"mongodb+srv://{connUser}:{pwd}"
-            f"@{user}.yuazcu9.mongodb.net/aplicacao?"
-            f"retryWrites=true&w=majority&appName={user}"
-        )
+        connURI = SETTINGS.URI
+        uri = connURI
         
         client = MongoClient(uri, server_api=ServerApi('1'))
 
