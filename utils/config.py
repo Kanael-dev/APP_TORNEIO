@@ -9,3 +9,4 @@ class SETTINGS:
     API_KEY = os.getenv("API_KEY_JWT")
     USER = os.getenv("USER")
     CONNUSER = os.getenv("CONNUSER")
+    URI = os.getenv("URI")
