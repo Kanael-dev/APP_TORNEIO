@@ -1,11 +1,85 @@
 import bcrypt
+import json
 from bson import ObjectId
 from flask import Blueprint, jsonify, request
+import urllib.error
+import urllib.request
 
 from router.authenticate import generate_token, token_required
 from router.db import admin_collection, status_collection, players_collection
 
 admin_router = Blueprint("admin_router", __name__)
+TEAM_SIZE = 5
+DISCORD_WEBHOOK_URL = "https://discord.com/api/webhooks/1441099986510286952/zXVBLQpfhsXlGXdwSnbPgd9wHH88lOvbhP9-IPuQRgI9IEUR2hNuUC48wnmarMKV7T7L"
+
+
+def _to_int(value, default=0):
+    """Safely cast elo values to int for balance calculations."""
+    try:
+        return int(value)
+    except (TypeError, ValueError):
+        return default
+
+
+def _build_balanced_teams(players):
+    """Retorna payload de times balanceados em blocos de TEAM_SIZE."""
+    prepared_players = [{**p, "_elo_int": _to_int(p.get("elo"))} for p in players]
+    prepared_players.sort(key=lambda x: x["_elo_int"], reverse=True)
+
+    total_players = len(prepared_players)
+    team_count = max(1, (total_players + TEAM_SIZE - 1) // TEAM_SIZE)
+    teams = [{"players": [], "total_elo": 0} for _ in range(team_count)]
+
+    for player in prepared_players:
+        elo_value = player["_elo_int"]
+        eligible_indices = [
+            idx for idx, team in enumerate(teams) if len(team["players"]) < TEAM_SIZE
+        ]
+        if not eligible_indices:
+            eligible_indices = [0]
+        target_idx = min(eligible_indices, key=lambda i: teams[i]["total_elo"])
+        teams[target_idx]["players"].append(player)
+        teams[target_idx]["total_elo"] += elo_value
+
+    payload = {
+        "teams": [
+            {
+                "title": f"Time {idx + 1}",
+                "players": [
+                    {k: v for k, v in player.items() if k != "_elo_int"}
+                    for player in team["players"]
+                ],
+                "total_elo": team["total_elo"],
+                "count": len(team["players"]),
+            }
+            for idx, team in enumerate(teams)
+        ]
+    }
+
+    totals = [team["total_elo"] for team in teams]
+    payload["difference"] = max(totals) - min(totals) if totals else 0
+
+    return payload
+
+
+def _build_discord_blocks(payload):
+    """Gera uma mensagem por time para evitar limite de caracteres do Discord."""
+    teams = payload.get("teams") or []
+    blocks = []
+    for team in teams:
+        title = team.get("title", "Time")
+        lines = [f"{title}:"]
+        for player in team.get("players", []):
+            name = player.get("name", "Desconhecido")
+            tag = player.get("tag") or ""
+            tag_part = f" #{tag}" if tag else ""
+            lines.append(f"- {name}{tag_part}")
+        content = "\n".join(lines)
+        # garante espaco para o discord (limite 2000), mas aqui cada bloco fica pequeno
+        if len(content) > 1800:
+            content = content[:1800] + "\n... (mensagem truncada)"
+        blocks.append({"title": title, "content": content})
+    return blocks
 
 
 @admin_router.route("/login", methods=["POST"])
@@ -147,3 +221,112 @@ def remove_all_players():
             "lista_anterior": current_players,
         }
     )
+
+
+@admin_router.route("/teams/generate", methods=["GET"])
+@token_required
+def generate_balanced_teams():
+    """Gera times de ate 5 jogadores, balanceando elo total entre os times."""
+    players = list(players_collection.find({}, {"_id": 0}))
+
+    if not players:
+        return jsonify({"message": "Nenhum jogador cadastrado"}), 404
+
+    payload = _build_balanced_teams(players)
+    return jsonify(payload)
+
+
+@admin_router.route("/teams/send", methods=["POST"])
+@token_required
+def send_balanced_teams():
+    """Gera os times e envia para o Discord via webhook."""
+    players = list(players_collection.find({}, {"_id": 0}))
+    if not players:
+        return jsonify({"message": "Nenhum jogador cadastrado"}), 404
+
+    payload = _build_balanced_teams(players)
+    blocks = _build_discord_blocks(payload)
+
+    deliveries = []
+    for block in blocks:
+        headers = {
+            "Content-Type": "application/json",
+            # Alguns proxies/Cloudflare bloqueiam user-agents padrao de libs; definimos um UA generico.
+            "User-Agent": "DiscordBot (balanceador-times/1.0)",
+            "Accept": "*/*",
+        }
+        req = urllib.request.Request(
+            DISCORD_WEBHOOK_URL,
+            data=json.dumps({"content": block["content"]}).encode(),
+            headers=headers,
+            method="POST",
+        )
+        try:
+            with urllib.request.urlopen(req, timeout=10) as resp:
+                status = resp.getcode()
+                body = resp.read().decode(errors="ignore")
+                deliveries.append(
+                    {
+                        "title": block["title"],
+                        "status": status,
+                        "response": body,
+                    }
+                )
+        except urllib.error.HTTPError as exc:
+            error_body = exc.read().decode(errors="ignore")
+            deliveries.append(
+                {
+                    "title": block["title"],
+                    "status": exc.code,
+                    "error": error_body,
+                }
+            )
+        except Exception as exc:
+            deliveries.append(
+                {
+                    "title": block["title"],
+                    "status": 0,
+                    "error": str(exc),
+                }
+            )
+
+    all_ok = all(item.get("status") and 200 <= item["status"] < 300 for item in deliveries)
+    return jsonify(
+        {
+            "message": "Times enviados" if all_ok else "Falha em alguns envios",
+            "deliveries": deliveries,
+            **payload,
+        }
+    ), (200 if all_ok else 502)
+
+
+@admin_router.route("/teams/sendFirstMsg", methods=["POST"])
+@token_required
+def send_first_message():
+    """Envia uma mensagem simples de teste para o Discord."""
+    headers = {
+        "Content-Type": "application/json",
+        "User-Agent": "DiscordBot (balanceador-times/1.0)",
+        "Accept": "*/*",
+    }
+    body = json.dumps({"content": "Time gerado com sucesso!"}).encode()
+    req = urllib.request.Request(
+        DISCORD_WEBHOOK_URL,
+        data=body,
+        headers=headers,
+        method="POST",
+    )
+    try:
+        with urllib.request.urlopen(req, timeout=10) as resp:
+            status = resp.getcode()
+            response_body = resp.read().decode(errors="ignore")
+    except urllib.error.HTTPError as exc:
+        error_body = exc.read().decode(errors="ignore")
+        return (
+            jsonify({"message": "Erro ao enviar para Discord", "status": exc.code, "error": error_body}),
+            502,
+        )
+    except Exception as exc:
+        return jsonify({"message": "Erro ao enviar para Discord", "error": str(exc)}), 502
+
+    return jsonify({"message": "Mensagem de teste enviada", "discord_status": status, "discord_response": response_body})

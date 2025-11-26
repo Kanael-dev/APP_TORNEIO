@@ -89,15 +89,3 @@ def get_players():
     return jsonify(players)
 
 
-@form_router.route("/players/<string:player_id>", methods=["DELETE"])
-def remove_player(player_id):
-    try:
-        object_id = ObjectId(player_id)
-    except Exception:
-        return jsonify({"message": "ID invalido"}), 400
-
-    result = players_collection.delete_one({"_id": object_id})
-    if result.deleted_count:
-        return jsonify({"message": "Jogador removido", "status": 1})
-
-    return jsonify({"message": "Jogador nao encontrado", "status": 0}), 404
