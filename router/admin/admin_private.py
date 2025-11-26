@@ -161,6 +161,19 @@ def get_status():
     return jsonify(status)
 
 
+@admin_router.route("/app_status/forms", methods=["GET"])
+@token_required
+def list_all_forms():
+    """Retorna todos os formularios cadastrados em db_StatusAplicacao (rota protegida)."""
+    forms = []
+    for form in status_collection.find({}):
+        payload = {**form}
+        payload["id"] = str(payload.pop("_id", ""))
+        forms.append(payload)
+
+    return jsonify({"total": len(forms), "forms": forms})
+
+
 @admin_router.route("/app_status/<string:form_id>", methods=["PUT"])
 @token_required
 def update_status(form_id):

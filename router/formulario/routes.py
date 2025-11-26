@@ -16,6 +16,7 @@ def get_active_form():
     return jsonify({"message": "Existe formulario ativo", "forms": str(active_form["_id"]), "title": active_form["name"], "game": active_form["type_game"], "date": active_form["date"]})
 
 
+
 @form_router.route("/valide_forms", methods=["POST"])
 def validate_users():
     data = request.get_json() or {}
