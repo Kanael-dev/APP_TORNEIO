@@ -13,7 +13,7 @@ def get_active_form():
     if active_form is None:
         return jsonify({"message": "Nenhum formulario ativo", "forms": 0}), 404
 
-    return jsonify({"message": "Existe formulario ativo", "forms": str(active_form["_id"])})
+    return jsonify({"message": "Existe formulario ativo", "forms": str(active_form["_id"]), "title": active_form["name"], "game": active_form["type_game"], "date": active_form["date"]})
 
 
 @form_router.route("/valide_forms", methods=["POST"])
