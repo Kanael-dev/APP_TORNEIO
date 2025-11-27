@@ -6,7 +6,8 @@ import urllib.error
 import urllib.request
 
 from router.authenticate import generate_token, token_required
-from router.db import admin_collection, status_collection, players_collection
+from router.db import admin_collection, status_collection, players_collection, matches_collection
+from datetime import datetime
 
 admin_router = Blueprint("admin_router", __name__)
 TEAM_SIZE = 5
@@ -80,6 +81,93 @@ def _build_discord_blocks(payload):
             content = content[:1800] + "\n... (mensagem truncada)"
         blocks.append({"title": title, "content": content})
     return blocks
+
+    def _build_initial_standings(teams):
+    """
+    Cria a tabela de classificação inicial para cada time.
+    Sem pontos, só vitória/derrota.
+    """
+    standings = []
+
+    for t in teams:
+        standings.append({
+            "team": t["title"],
+            "wins": 0,
+            "losses": 0,
+            "games": 0,
+            "winrate": 0.0
+        })
+
+    return standings
+
+
+def _compute_standings(teams, matches):
+    """
+    Recalcula a classificação a partir:
+    - lista de times (teams do payload _build_balanced_teams)
+    - lista de partidas (matches_collection)
+
+    Regra:
+    - winner sempre é o nome de um time (igual ao title)
+    - sem empates: ou ganha ou perde
+    """
+    # Mapeia times por nome
+    standings_map = {}
+
+    for t in teams:
+        name = t["title"]
+        standings_map[name] = {
+            "team": name,
+            "wins": 0,
+            "losses": 0,
+            "games": 0,
+            "winrate": 0.0
+        }
+
+    # Processa cada partida
+    for m in matches:
+        home = m.get("home")
+        away = m.get("away")
+        winner = m.get("winner")
+
+        if home not in standings_map or away not in standings_map:
+            # Se aparecer algum nome estranho, ignora
+            continue
+
+        # Atualiza games
+        standings_map[home]["games"] += 1
+        standings_map[away]["games"] += 1
+
+        if winner == home:
+            standings_map[home]["wins"] += 1
+            standings_map[away]["losses"] += 1
+        elif winner == away:
+            standings_map[away]["wins"] += 1
+            standings_map[home]["losses"] += 1
+        else:
+            # Se winner for inválido, ignora esse registro
+            standings_map[home]["games"] -= 1
+            standings_map[away]["games"] -= 1
+            continue
+
+    # Calcula winrate
+    for s in standings_map.values():
+        games = s["games"]
+        wins = s["wins"]
+        s["winrate"] = round(wins / games, 3) if games > 0 else 0.0
+
+    # Ordena:
+    # 1) mais vitórias
+    # 2) maior winrate
+    # 3) menos derrotas
+    standings = list(standings_map.values())
+    standings.sort(
+        key=lambda s: (s["wins"], s["winrate"], -s["losses"]),
+        reverse=True
+    )
+
+    return standings
+
 
 
 @admin_router.route("/login", methods=["POST"])
@@ -343,3 +431,87 @@ def send_first_message():
         return jsonify({"message": "Erro ao enviar para Discord", "error": str(exc)}), 502
 
     return jsonify({"message": "Mensagem de teste enviada", "discord_status": status, "discord_response": response_body})
+
+
+@admin_router.route("/tournament/matchResult", methods=["POST"])
+@token_required
+def register_match_result():
+    """
+    Registra o resultado de uma partida e devolve a classificação atualizada.
+    Body esperado:
+    {
+        "home": "Time 1",
+        "away": "Time 2",
+        "winner": "Time 1",
+        "round": 1   // opcional
+    }
+
+    Regras:
+    - winner deve ser igual a "home" OU "away"
+    - Não existe empate
+    """
+    data = request.get_json() or {}
+    home = data.get("home")
+    away = data.get("away")
+    winner = data.get("winner")
+    round_number = data.get("round")  # opcional
+
+    if not home or not away or not winner:
+        return jsonify({"message": "Campos 'home', 'away' e 'winner' sao obrigatorios"}), 400
+
+    if winner not in (home, away):
+        return jsonify({"message": "'winner' deve ser igual a 'home' ou 'away'"}), 400
+
+    # Monta documento da partida
+    match_doc = {
+        "home": home,
+        "away": away,
+        "winner": winner,
+        "round": round_number,
+        "created_at": datetime.utcnow()
+    }
+
+    # Salva no Mongo
+    result = matches_collection.insert_one(match_doc)
+    match_doc["id"] = str(result.inserted_id)
+
+    # Recalcula times e classificacao
+    players = list(players_collection.find({}, {"_id": 0}))
+    if not players:
+        return jsonify({"message": "Nenhum jogador cadastrado", "match": match_doc}), 200
+
+    balanced = _build_balanced_teams(players)
+    teams = balanced.get("teams", [])
+
+    all_matches = list(matches_collection.find({}, {"_id": 0}))
+
+    standings = _compute_standings(teams, all_matches)
+
+    return jsonify(
+        {
+            "message": "Resultado registrado",
+            "match": match_doc,
+            "standings": standings
+        }
+    ), 201
+
+
+@admin_router.route("/tournament/standings", methods=["GET"])
+@token_required
+def get_standings():
+    """
+    Retorna a classificação atual baseada em todas as partidas registradas.
+    """
+    players = list(players_collection.find({}, {"_id": 0}))
+    if not players:
+        return jsonify({"message": "Nenhum jogador cadastrado", "standings": []}), 200
+
+    balanced = _build_balanced_teams(players)
+    teams = balanced.get("teams", [])
+
+    matches = list(matches_collection.find({}, {"_id": 0}))
+
+    standings = _compute_standings(teams, matches)
+
+    return jsonify({"standings": standings}), 200
+
